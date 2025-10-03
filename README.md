@@ -34,6 +34,11 @@
 - 适用场景：需要搭建 ZeroTier Moon 网络节点时。
 - 用法：`sudo bash zerotier_moon_setup.sh`
 
+### 7. generate_nginx_proxy.sh
+自动配置反向代理并且申请https证书
+- 适用场景：配置nginx反向代理。
+- 用法：`sudo bash generate_nginx_proxy.sh`
+
 ---
 
 如需详细用法和参数说明，请参考各脚本内注释。
