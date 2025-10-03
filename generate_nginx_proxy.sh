@@ -106,7 +106,7 @@ SUBDOMAIN=$(echo $SERVER_NAME | cut -d'.' -f1)
 CONF_NAME="${SUBDOMAIN}"
 SITES_AVAILABLE="/etc/nginx/sites-available"
 SITES_ENABLED="/etc/nginx/sites-enabled"
-CONF_FILE="${SITES_AVAILABLE}/${CONF_NAME}"
+CONF_FILE="${SITES_AVAILABLE}/${CONF_NAME}.conf"
 
 # 确保目录存在
 mkdir -p "$SITES_AVAILABLE"
