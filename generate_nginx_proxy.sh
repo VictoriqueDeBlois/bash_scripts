@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Nginx 反向代理配置自动生成脚本
+# Nginx 反向代理配置自动生成脚本（支持路径代理）
 # 用法: ./generate_nginx_proxy.sh
 
 set -e
@@ -71,7 +71,24 @@ check_and_install
 echo -e "${GREEN}=== Nginx 反向代理配置生成工具 ===${NC}\n"
 
 read -p "请输入域名 (例如: api.example.com): " SERVER_NAME
+read -p "请输入路径 (例如: /api 或直接回车表示根路径 /): " PROXY_PATH
 read -p "请输入后端服务端口 (例如: 3000): " PROXY_PORT
+
+# 处理路径输入
+if [ -z "$PROXY_PATH" ]; then
+    PROXY_PATH="/"
+else
+    # 确保路径以 / 开头
+    if [[ ! "$PROXY_PATH" =~ ^/ ]]; then
+        PROXY_PATH="/$PROXY_PATH"
+    fi
+    # 移除末尾的 /
+    PROXY_PATH="${PROXY_PATH%/}"
+    # 如果处理后为空，设为 /
+    if [ -z "$PROXY_PATH" ]; then
+        PROXY_PATH="/"
+    fi
+fi
 
 # 验证输入
 if [ -z "$SERVER_NAME" ]; then
@@ -95,32 +112,21 @@ CONF_FILE="${SITES_AVAILABLE}/${CONF_NAME}"
 mkdir -p "$SITES_AVAILABLE"
 mkdir -p "$SITES_ENABLED"
 
-# 检查配置文件是否已存在
-if [ -f "$CONF_FILE" ]; then
-    read -p "配置文件 ${CONF_NAME} 已存在，是否覆盖? (y/n): " OVERWRITE
-    if [ "$OVERWRITE" != "y" ] && [ "$OVERWRITE" != "Y" ]; then
-        echo -e "${YELLOW}操作已取消${NC}"
-        exit 0
-    fi
-fi
+echo -e "\n${GREEN}配置信息:${NC}"
+echo -e "域名: ${SERVER_NAME}"
+echo -e "路径: ${PROXY_PATH}"
+echo -e "代理端口: ${PROXY_PORT}"
+echo -e "配置文件: ${CONF_FILE}"
+echo ""
 
-echo -e "\n${GREEN}开始生成配置...${NC}"
+# 生成 location 块
+generate_location_block() {
+    local path="$1"
+    local port="$2"
 
-# 生成 Nginx 配置文件
-cat > "$CONF_FILE" << EOF
-server {
-    listen 80;
-    listen [::]:80;
-
-    server_name ${SERVER_NAME};
-
-    # 访问日志
-    access_log /var/log/nginx/${CONF_NAME}_access.log;
-    error_log /var/log/nginx/${CONF_NAME}_error.log;
-
-    # 反向代理配置
-    location / {
-        proxy_pass http://127.0.0.1:${PROXY_PORT};
+    cat << EOF
+    location ${path} {
+        proxy_pass http://127.0.0.1:${port};
         proxy_http_version 1.1;
 
         # 请求头设置
@@ -138,21 +144,88 @@ server {
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
     }
+EOF
+}
+
+# 检查配置文件是否已存在
+if [ -f "$CONF_FILE" ]; then
+    echo -e "${YELLOW}配置文件 ${CONF_NAME} 已存在${NC}"
+
+    # 检查是否已经有相同路径的配置
+    if grep -q "location ${PROXY_PATH}" "$CONF_FILE"; then
+        echo -e "${YELLOW}路径 ${PROXY_PATH} 已存在于配置中${NC}"
+        read -p "是否覆盖此路径的配置? (y/n): " OVERWRITE_PATH
+        if [ "$OVERWRITE_PATH" != "y" ] && [ "$OVERWRITE_PATH" != "Y" ]; then
+            echo -e "${YELLOW}操作已取消${NC}"
+            exit 0
+        fi
+
+        # 删除旧的 location 块
+        echo -e "${GREEN}删除旧的 location ${PROXY_PATH} 配置...${NC}"
+        # 使用 sed 删除匹配的 location 块
+        sed -i "/location ${PROXY_PATH//\//\\/}/,/^    }/d" "$CONF_FILE"
+    fi
+
+    # 在最后一个 } 之前插入新的 location 块
+    echo -e "${GREEN}添加新的路径配置到现有文件...${NC}"
+
+    # 创建临时文件
+    TEMP_FILE=$(mktemp)
+
+    # 生成新的 location 块
+    NEW_LOCATION=$(generate_location_block "$PROXY_PATH" "$PROXY_PORT")
+
+    # 在最后一个 } 前插入
+    awk -v location="$NEW_LOCATION" '
+        /^}$/ && !found {
+            print location
+            found=1
+        }
+        {print}
+    ' "$CONF_FILE" > "$TEMP_FILE"
+
+    mv "$TEMP_FILE" "$CONF_FILE"
+    echo -e "${GREEN}✓ 已添加路径 ${PROXY_PATH} 到配置文件${NC}"
+
+else
+    # 创建新的配置文件
+    echo -e "${GREEN}创建新配置文件...${NC}"
+
+    cat > "$CONF_FILE" << EOF
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name ${SERVER_NAME};
+
+    # 访问日志
+    access_log /var/log/nginx/${CONF_NAME}_access.log;
+    error_log /var/log/nginx/${CONF_NAME}_error.log;
+
+    # 反向代理配置
+$(generate_location_block "$PROXY_PATH" "$PROXY_PORT")
 }
 EOF
 
-echo -e "${GREEN}✓ 配置文件已生成: ${CONF_FILE}${NC}"
+    echo -e "${GREEN}✓ 配置文件已生成: ${CONF_FILE}${NC}"
 
-# 创建软链接
-if [ -L "${SITES_ENABLED}/${CONF_NAME}" ]; then
-    rm "${SITES_ENABLED}/${CONF_NAME}"
+    # 创建软链接
+    if [ -L "${SITES_ENABLED}/${CONF_NAME}" ]; then
+        rm "${SITES_ENABLED}/${CONF_NAME}"
+    fi
+
+    ln -s "$CONF_FILE" "${SITES_ENABLED}/${CONF_NAME}"
+    echo -e "${GREEN}✓ 软链接已创建: ${SITES_ENABLED}/${CONF_NAME}${NC}"
 fi
 
-ln -s "$CONF_FILE" "${SITES_ENABLED}/${CONF_NAME}"
-echo -e "${GREEN}✓ 软链接已创建: ${SITES_ENABLED}/${CONF_NAME}${NC}"
+# 显示当前配置内容
+echo -e "\n${YELLOW}当前配置文件内容:${NC}"
+echo -e "${YELLOW}----------------------------------------${NC}"
+cat "$CONF_FILE"
+echo -e "${YELLOW}----------------------------------------${NC}\n"
 
 # 测试 Nginx 配置
-echo -e "\n${YELLOW}测试 Nginx 配置...${NC}"
+echo -e "${YELLOW}测试 Nginx 配置...${NC}"
 if nginx -t; then
     echo -e "${GREEN}✓ Nginx 配置测试通过${NC}"
 else
@@ -165,26 +238,49 @@ echo -e "\n${YELLOW}重载 Nginx...${NC}"
 systemctl reload nginx
 echo -e "${GREEN}✓ Nginx 已重载${NC}"
 
-# 使用 Certbot 生成 SSL 证书
-echo -e "\n${YELLOW}开始生成 SSL 证书...${NC}"
-echo -e "${YELLOW}注意: 请确保域名已正确解析到本服务器${NC}\n"
-
-if certbot --nginx -d "$SERVER_NAME" --non-interactive --agree-tos --redirect --register-unsafely-without-email || \
-   certbot --nginx -d "$SERVER_NAME"; then
-    echo -e "\n${GREEN}✓ SSL 证书配置成功${NC}"
-else
-    echo -e "\n${YELLOW}⚠ SSL 证书配置失败，但 HTTP 配置已生效${NC}"
-    echo -e "${YELLOW}你可以稍后手动运行: certbot --nginx -d ${SERVER_NAME}${NC}"
+# 检查是否需要配置 SSL
+NEED_SSL=false
+if [ -f "$CONF_FILE" ]; then
+    # 检查是否已经有 SSL 配置
+    if ! grep -q "listen 443 ssl" "$CONF_FILE"; then
+        NEED_SSL=true
+    fi
 fi
 
-# 最终测试并重载
-nginx -t && systemctl reload nginx
+# 使用 Certbot 生成 SSL 证书
+if [ "$NEED_SSL" = true ]; then
+    echo -e "\n${YELLOW}检测到需要配置 SSL 证书...${NC}"
+    echo -e "${YELLOW}注意: 请确保域名已正确解析到本服务器${NC}\n"
+
+    read -p "是否现在配置 SSL 证书? (y/n): " CONFIGURE_SSL
+
+    if [ "$CONFIGURE_SSL" = "y" ] || [ "$CONFIGURE_SSL" = "Y" ]; then
+        if certbot --nginx -d "$SERVER_NAME" --non-interactive --agree-tos --redirect --register-unsafely-without-email 2>/dev/null || \
+           certbot --nginx -d "$SERVER_NAME"; then
+            echo -e "\n${GREEN}✓ SSL 证书配置成功${NC}"
+        else
+            echo -e "\n${YELLOW}⚠ SSL 证书配置失败，但 HTTP 配置已生效${NC}"
+            echo -e "${YELLOW}你可以稍后手动运行: certbot --nginx -d ${SERVER_NAME}${NC}"
+        fi
+
+        # 最终测试并重载
+        nginx -t && systemctl reload nginx
+    else
+        echo -e "${YELLOW}跳过 SSL 配置，稍后可手动运行: certbot --nginx -d ${SERVER_NAME}${NC}"
+    fi
+else
+    echo -e "\n${GREEN}✓ SSL 证书已配置，无需重复申请${NC}"
+fi
 
 echo -e "\n${GREEN}========================================${NC}"
 echo -e "${GREEN}配置完成！${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo -e "域名: ${SERVER_NAME}"
+echo -e "路径: ${PROXY_PATH}"
 echo -e "代理端口: ${PROXY_PORT}"
 echo -e "配置文件: ${CONF_FILE}"
-echo -e "\n访问地址: https://${SERVER_NAME}"
+echo -e "\n访问地址: http://${SERVER_NAME}${PROXY_PATH}"
+if [ "$NEED_SSL" = false ] || [ "$CONFIGURE_SSL" = "y" ] || [ "$CONFIGURE_SSL" = "Y" ]; then
+    echo -e "HTTPS访问: https://${SERVER_NAME}${PROXY_PATH}"
+fi
 echo -e "${GREEN}========================================${NC}"
