@@ -149,7 +149,7 @@ EOF
 
 # 检查配置文件是否已存在
 if [ -f "$CONF_FILE" ]; then
-    echo -e "${YELLOW}配置文件 ${CONF_NAME} 已存在${NC}"
+    echo -e "${YELLOW}配置文件 ${CONF_NAME}.conf 已存在${NC}"
 
     # 检查是否已经有相同路径的配置
     if grep -q "location ${PROXY_PATH}" "$CONF_FILE"; then
@@ -210,12 +210,12 @@ EOF
     echo -e "${GREEN}✓ 配置文件已生成: ${CONF_FILE}${NC}"
 
     # 创建软链接
-    if [ -L "${SITES_ENABLED}/${CONF_NAME}" ]; then
-        rm "${SITES_ENABLED}/${CONF_NAME}"
+    if [ -L "${SITES_ENABLED}/${CONF_NAME}.conf" ]; then
+        rm "${SITES_ENABLED}/${CONF_NAME}.conf"
     fi
 
-    ln -s "$CONF_FILE" "${SITES_ENABLED}/${CONF_NAME}"
-    echo -e "${GREEN}✓ 软链接已创建: ${SITES_ENABLED}/${CONF_NAME}${NC}"
+    ln -s "$CONF_FILE" "${SITES_ENABLED}/${CONF_NAME}.conf"
+    echo -e "${GREEN}✓ 软链接已创建: ${SITES_ENABLED}/${CONF_NAME}.conf${NC}"
 fi
 
 # 显示当前配置内容
