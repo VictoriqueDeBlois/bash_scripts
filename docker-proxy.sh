@@ -7,8 +7,8 @@
 
 PROXY_CONFIG_DIR="/etc/systemd/system/docker.service.d"
 PROXY_CONFIG_FILE="$PROXY_CONFIG_DIR/http-proxy.conf"
-PID_FILE="./docker-ssh-proxy.pid"
-PORT_FILE="./docker-ssh-proxy.port"
+PID_FILE="/tmp/docker-ssh-proxy.pid"
+PORT_FILE="/tmp/docker-ssh-proxy.port"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -35,7 +35,7 @@ find_free_port() {
     for port in {8080..9000}; do
         if ! netstat -tuln 2>/dev/null | grep -q ":$port " && \
            ! ss -tuln 2>/dev/null | grep -q ":$port "; then
-            echo "$port"
+            echo $port
             return 0
         fi
     done
@@ -73,19 +73,48 @@ start_proxy() {
     local port=$(find_free_port)
     print_info "找到空闲端口: $port"
 
+    # 查找 SSH 私钥
+    local ssh_key=""
+    local possible_keys=(
+        "$HOME/.ssh/id_rsa"
+        "$HOME/.ssh/id_ed25519"
+        "$HOME/.ssh/id_ecdsa"
+        "$HOME/.ssh/id_dsa"
+    )
+
+    for key in "${possible_keys[@]}"; do
+        if [ -f "$key" ]; then
+            ssh_key="$key"
+            print_info "找到 SSH 私钥: $key"
+            break
+        fi
+    done
+
+    # 构建 SSH 命令参数
+    local ssh_opts="-o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes"
+    if [ -n "$ssh_key" ]; then
+        ssh_opts="$ssh_opts -i $ssh_key"
+    fi
+
     # 测试 SSH 连接
     print_info "测试 SSH 连接到 $server ..."
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$server" exit 2>/dev/null; then
-        print_warning "无法使用密钥认证，将需要输入密码"
+    if [ -n "$ssh_key" ]; then
+        if ! ssh -i "$ssh_key" -o BatchMode=yes -o ConnectTimeout=5 "$server" exit 2>/dev/null; then
+            print_warning "使用密钥 $ssh_key 连接失败，将需要输入密码"
+        else
+            print_info "SSH 密钥认证成功"
+        fi
+    else
+        print_warning "未找到 SSH 私钥，将需要输入密码"
     fi
 
     # 启动 SSH 隧道
     print_info "启动 SSH 隧道..."
-    ssh -f -N -D "$port" \
-        -o ServerAliveInterval=60 \
-        -o ServerAliveCountMax=3 \
-        -o ExitOnForwardFailure=yes \
-        "$server"
+    if [ -n "$ssh_key" ]; then
+        ssh -f -N -D "$port" -i "$ssh_key" $ssh_opts "$server"
+    else
+        ssh -f -N -D "$port" $ssh_opts "$server"
+    fi
 
     if [ $? -ne 0 ]; then
         print_error "SSH 隧道启动失败"
@@ -102,8 +131,8 @@ start_proxy() {
     fi
 
     # 保存 PID 和端口
-    echo "$pid" > "$PID_FILE"
-    echo "$port" > "$PORT_FILE"
+    echo $pid > "$PID_FILE"
+    echo $port > "$PORT_FILE"
 
     print_info "SSH 隧道已启动 (PID: $pid, Port: $port)"
 
@@ -188,7 +217,7 @@ show_status() {
             print_info "SSH 隧道: ${GREEN}运行中${NC}"
             echo "  PID: $pid"
             echo "  端口: $port"
-            echo "  进程: $(ps -p "$pid" -o args= 2>/dev/null)"
+            echo "  进程: $(ps -p $pid -o args= 2>/dev/null)"
         else
             print_warning "SSH 隧道: ${YELLOW}已停止${NC} (PID 文件存在但进程不存在)"
         fi
