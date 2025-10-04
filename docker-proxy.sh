@@ -90,12 +90,6 @@ start_proxy() {
         fi
     done
 
-    # 构建 SSH 命令参数
-    local ssh_opts="-o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes"
-    if [ -n "$ssh_key" ]; then
-        ssh_opts="$ssh_opts -i $ssh_key"
-    fi
-
     # 测试 SSH 连接
     print_info "测试 SSH 连接到 $server ..."
     if [ -n "$ssh_key" ]; then
@@ -111,9 +105,18 @@ start_proxy() {
     # 启动 SSH 隧道
     print_info "启动 SSH 隧道..."
     if [ -n "$ssh_key" ]; then
-        ssh -f -N -D "$port" -i "$ssh_key" $ssh_opts "$server"
+        ssh -f -N -D "$port" \
+            -i "$ssh_key" \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=3 \
+            -o ExitOnForwardFailure=yes \
+            "$server"
     else
-        ssh -f -N -D "$port" $ssh_opts "$server"
+        ssh -f -N -D "$port" \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=3 \
+            -o ExitOnForwardFailure=yes \
+            "$server"
     fi
 
     if [ $? -ne 0 ]; then
@@ -145,7 +148,7 @@ start_proxy() {
 [Service]
 Environment="HTTP_PROXY=socks5://127.0.0.1:$port"
 Environment="HTTPS_PROXY=socks5://127.0.0.1:$port"
-Environment="NO_PROXY=localhost,127.0.0.1,docker.io"
+Environment="NO_PROXY=localhost,127.0.0.1"
 EOF
 
     # 重启 Docker
@@ -255,19 +258,55 @@ test_proxy() {
 
     local port=$(cat "$PORT_FILE")
 
-    print_info "测试 SOCKS5 代理连接..."
-    if curl -m 10 -x socks5://127.0.0.1:$port https://www.google.com > /dev/null 2>&1; then
-        print_info "代理连接: ${GREEN}正常${NC}"
+    echo "========== 代理连接测试 =========="
+    echo ""
+
+    # 测试1：检查端口监听
+    print_info "检查代理端口监听..."
+    if netstat -tuln 2>/dev/null | grep -q ":$port " || ss -tuln 2>/dev/null | grep -q ":$port "; then
+        print_info "端口 $port: ${GREEN}正在监听${NC}"
     else
-        print_error "代理连接: ${RED}失败${NC}"
+        print_error "端口 $port: ${RED}未监听${NC}"
+        return 1
     fi
 
-    print_info "测试 Docker 拉取镜像..."
-    if timeout 30 docker pull hello-world > /dev/null 2>&1; then
+    # 测试2：测试 HTTP 连接（避免 SSL 问题）
+    print_info "测试 HTTP 代理连接..."
+    if curl -m 10 -x socks5://127.0.0.1:$port http://www.baidu.com > /dev/null 2>&1; then
+        print_info "HTTP 连接: ${GREEN}成功${NC}"
+    else
+        print_warning "HTTP 连接: ${YELLOW}失败${NC}"
+    fi
+
+    # 测试3：测试 HTTPS 连接（跳过证书验证）
+    print_info "测试 HTTPS 代理连接..."
+    if curl -k -m 10 -x socks5://127.0.0.1:$port https://www.google.com > /dev/null 2>&1; then
+        print_info "HTTPS 连接: ${GREEN}成功${NC}"
+    else
+        print_warning "HTTPS 连接: ${YELLOW}失败${NC}"
+    fi
+
+    # 测试4：测试 Docker Registry
+    print_info "测试 Docker Registry 连接..."
+    if curl -k -m 10 -x socks5://127.0.0.1:$port https://registry-1.docker.io/v2/ > /dev/null 2>&1; then
+        print_info "Docker Registry: ${GREEN}可访问${NC}"
+    else
+        print_warning "Docker Registry: ${YELLOW}不可访问${NC}"
+    fi
+
+    # 测试5：测试 Docker 拉取
+    print_info "测试 Docker 拉取镜像 (hello-world)..."
+    echo "这可能需要一些时间..."
+    if timeout 60 docker pull hello-world > /dev/null 2>&1; then
         print_info "Docker 拉取: ${GREEN}成功${NC}"
+        docker rmi hello-world > /dev/null 2>&1
     else
         print_warning "Docker 拉取: ${YELLOW}失败或超时${NC}"
+        echo "  提示: 首次拉取可能较慢，请手动测试: docker pull hello-world"
     fi
+
+    echo ""
+    echo "================================"
 }
 
 # 主函数
