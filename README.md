@@ -35,11 +35,32 @@
 - 用法：`sudo bash zerotier_moon_setup.sh`
 
 ### 7. generate_nginx_proxy.sh
-自动配置反向代理并且申请https证书
-- 适用场景：配置nginx反向代理。
+Nginx 反向代理与 HTTPS 自动化配置脚本。支持自定义域名、路径和后端端口，自动生成 Nginx 配置并可一键申请 Let's Encrypt SSL 证书。
+- 适用场景：快速为 Web 服务配置反向代理和 HTTPS，适合多服务、多路径场景。
+- 主要功能：
+  - 检查并自动安装 nginx、certbot 等依赖
+  - 交互式输入域名、路径、后端端口，自动生成/更新 Nginx 配置
+  - 支持多路径代理，自动处理配置文件合并与去重
+  - 自动测试并重载 Nginx 配置
+  - 可选一键申请并配置 SSL 证书，实现 HTTP 自动跳转到 HTTPS
 - 用法：`sudo bash generate_nginx_proxy.sh`
+- 注意事项：需 root 权限运行，域名需已正确解析到本机
+
+### 8. docker-proxy.sh
+Docker SSH 代理管理脚本。用于通过 SSH 动态端口转发（SOCKS5 代理）为 Docker 配置网络代理，适合在受限网络环境下加速 Docker 镜像拉取或访问外部服务。
+- 适用场景：需要为 Docker 配置代理，或通过 SSH 隧道安全访问外部网络时。
+- 用法示例：
+  - 启动代理：`bash docker-proxy.sh start user@server`
+  - 停止代理：`bash docker-proxy.sh stop`
+  - 查看状态：`bash docker-proxy.sh status`
+  - 测试代理：`bash docker-proxy.sh test`
+  - 重启代理：`bash docker-proxy.sh restart user@server`
+- 主要功能：
+  - 自动查找本地空闲端口并建立 SSH 动态代理
+  - 自动配置/移除 Docker 的 HTTP/HTTPS 代理环境变量
+  - 支持状态查询与代理连通性测试
+  - 需具备 sudo 权限以修改 Docker 配置
 
 ---
 
 如需详细用法和参数说明，请参考各脚本内注释。
-
